@@ -20,7 +20,8 @@ catch (e) { chromium = require("playwright-core").chromium; }
   page.on("response", (r) => { if (r.status() >= 400) failedRequests.push(r.url() + " -> HTTP " + r.status()); });
 
   const results = {};
-  for (const [label, url] of [["root", "http://127.0.0.1:8093/"], ["indexHtml", "http://127.0.0.1:8093/index.html"]]) {
+  const BASE = process.env.BASE_URL || "http://127.0.0.1:8093/";
+  for (const [label, url] of [["root", BASE], ["indexHtml", BASE + "index.html"]]) {
     const p = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     p.on("pageerror", (e) => errors.push(label + " PAGEERROR: " + e.message));
     p.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") consoleMsgs.push(label + " " + m.type().toUpperCase() + ": " + m.text().slice(0, 200)); });
@@ -28,6 +29,12 @@ catch (e) { chromium = require("playwright-core").chromium; }
     p.on("response", (r) => { if (r.status() >= 400) failedRequests.push(r.url() + " -> HTTP " + r.status()); });
     await p.goto(url, { waitUntil: "load", timeout: 30000 });
     await p.waitForTimeout(3500);
+    // wait until all images complete (max 15s) so slow networks don't false-positive brokenImgs
+    await p.evaluate(() => Promise.race([
+      Promise.all(Array.from(document.querySelectorAll("img")).map((i) => i.complete ? Promise.resolve() : new Promise((res) => { i.onload = i.onerror = res; }))),
+      new Promise((res) => setTimeout(res, 15000)),
+    ]));
+    await p.waitForTimeout(300);
     results[label] = await p.evaluate(() => ({
       bodyHeight: document.body.scrollHeight,
       rootChildren: document.getElementById("root") ? document.getElementById("root").children.length : -1,
@@ -45,7 +52,7 @@ catch (e) { chromium = require("playwright-core").chromium; }
   // mobile viewport test
   const mp = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   mp.on("pageerror", (e) => errors.push("MOBILE PAGEERROR: " + e.message));
-  await mp.goto("http://127.0.0.1:8093/index.html", { waitUntil: "load", timeout: 30000 });
+  await mp.goto((process.env.BASE_URL || "http://127.0.0.1:8093/") + "index.html", { waitUntil: "load", timeout: 30000 });
   await mp.waitForTimeout(3000);
   const minfo = await mp.evaluate(() => ({
     rootChildren: document.getElementById("root") ? document.getElementById("root").children.length : -1,
